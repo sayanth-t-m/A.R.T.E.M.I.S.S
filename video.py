@@ -1,127 +1,176 @@
 import cv2
-import os
+import torch
 from pathlib import Path
 import logging
-from typing import Union, Optional
+from PIL import Image
+from transformers import AutoModelForImageClassification, ViTImageProcessor
+from typing import Union, Tuple
 
-def extract_frames(
-    video_path: Union[str, Path],
-    output_folder: Union[str, Path] = "frames",
-    num_frames: int = 6,
-    output_format: str = "jpg",
-    quality: int = 95
-) -> bool:
-    """
-    Extracts a specified number of frames from the input video at equal intervals.
+class VideoContentAnalyzer:
+    def __init__(self, model_name: str = "Falconsai/nsfw_image_detection"):
+        """
+        Initialize the content analyzer with the NSFW detection model.
+        
+        Parameters:
+            model_name (str): The name or path of the pre-trained model.
+        """
+        # Select device: use GPU if available, else CPU.
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Load the pre-trained image classification model and move it to the selected device.
+        self.model = AutoModelForImageClassification.from_pretrained(model_name).to(self.device)
+        # Load the corresponding image processor.
+        self.processor = ViTImageProcessor.from_pretrained(model_name)
+        
+        # Set up logging configuration
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
 
-    Parameters:
-        video_path (Union[str, Path]): Path to the video file
-        output_folder (Union[str, Path]): Folder to save the extracted frames
-        num_frames (int): Number of frames to extract (default: 6)
-        output_format (str): Format to save frames ('jpg' or 'png', default: 'jpg')
-        quality (int): Image quality for JPEG format (1-100, default: 95)
+    def analyze_frame(self, image: Image.Image) -> Tuple[str, float]:
+        """
+        Analyze a single frame for NSFW content.
+        
+        Parameters:
+            image (PIL.Image.Image): The image to analyze.
+            
+        Returns:
+            Tuple[str, float]: A tuple containing the prediction label and confidence score.
+        """
+        with torch.no_grad():
+            # Process the image to the required tensor format.
+            inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+            # Perform inference using the model.
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            
+            # Convert logits to probabilities.
+            probs = torch.softmax(logits, dim=-1)
+            # Find the index of the highest scoring prediction.
+            pred_idx = logits.argmax(-1).item()
+            confidence = probs[0][pred_idx].item()
+            
+            # Retrieve the human-readable label from the model's configuration.
+            return self.model.config.id2label[pred_idx], confidence
 
-    Returns:
-        bool: True if extraction was successful, False otherwise
-    """
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
-    try:
-        # Convert paths to Path objects for better cross-platform compatibility
+    def analyze_video(
+        self,
+        video_path: Union[str, Path],
+        num_frames: int = 6,
+        stop_on_nsfw: bool = True,
+        nsfw_threshold: float = 0.5
+    ) -> dict:
+        """
+        Analyze frames from a video for NSFW content.
+        
+        Parameters:
+            video_path (Union[str, Path]): Path to the video file.
+            num_frames (int): Number of frames to analyze.
+            stop_on_nsfw (bool): Whether to stop analysis when NSFW content is detected.
+            nsfw_threshold (float): Confidence threshold for NSFW classification.
+            
+        Returns:
+            dict: Analysis results including frame classifications and overall verdict.
+        """
         video_path = Path(video_path)
-        output_folder = Path(output_folder)
-
-        # Input validation
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        self.logger.info(f"Starting analysis of video: {video_path}")
         
-        if num_frames < 1:
-            raise ValueError("Number of frames must be positive")
-            
-        if quality < 1 or quality > 100:
-            raise ValueError("Quality must be between 1 and 100")
-            
-        if output_format.lower() not in ['jpg', 'jpeg', 'png']:
-            raise ValueError("Output format must be 'jpg' or 'png'")
-
-        # Create the output folder
-        output_folder.mkdir(parents=True, exist_ok=True)
-
-        # Open the video file
+        # Open the video file.
         cap = cv2.VideoCapture(str(video_path))
-        
         if not cap.isOpened():
             raise RuntimeError("Failed to open video file")
 
-        # Get video properties
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        duration = total_frames / fps if fps > 0 else 0
-
-        logger.info(f"Video properties: {total_frames} frames, {fps:.2f} FPS, "
-                   f"Duration: {duration:.2f} seconds")
-
-        # Adjust number of frames if video is too short
-        if total_frames < num_frames:
-            logger.warning(
-                f"Video has only {total_frames} frames. Adjusting request from "
-                f"{num_frames} to {total_frames} frames."
-            )
-            num_frames = total_frames
-
-        # Calculate frame interval
-        interval = max(1, total_frames // num_frames)
-        
-        # Extract frames
-        frames_saved = 0
-        for i in range(num_frames):
-            frame_position = min(i * interval, total_frames - 1)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
-            ret, frame = cap.read()
+        try:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            interval = max(1, total_frames // num_frames)
             
-            if ret:
-                # Prepare filename
-                frame_filename = output_folder / f"frame_{i+1:03d}.{output_format}"
+            results = {
+                'frames_analyzed': 0,
+                'nsfw_detected': False,
+                'frame_results': [],
+                'first_nsfw_frame': None
+            }
+
+            # Loop through and analyze selected frames.
+            for i in range(num_frames):
+                frame_position = min(i * interval, total_frames - 1)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
+                ret, frame = cap.read()
                 
-                # Save frame with appropriate parameters
-                if output_format.lower() in ['jpg', 'jpeg']:
-                    cv2.imwrite(str(frame_filename), frame, 
-                              [cv2.IMWRITE_JPEG_QUALITY, quality])
-                else:  # PNG
-                    cv2.imwrite(str(frame_filename), frame)
-                    
-                frames_saved += 1
-                logger.info(f"Saved frame {frames_saved}/{num_frames}: {frame_filename}")
-            else:
-                logger.warning(f"Failed to read frame at position {frame_position}")
+                if not ret:
+                    self.logger.warning(f"Failed to read frame at position {frame_position}")
+                    continue
 
-        cap.release()
-        
-        if frames_saved == 0:
-            raise RuntimeError("No frames were successfully extracted")
-            
-        logger.info(f"Successfully extracted {frames_saved} frames")
-        return True
+                # Convert the frame from BGR (OpenCV default) to RGB.
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Create a PIL Image from the frame.
+                pil_image = Image.fromarray(frame_rgb)
+                
+                # Analyze the frame using the NSFW detection model.
+                label, confidence = self.analyze_frame(pil_image)
+                
+                frame_result = {
+                    'frame_number': i + 1,
+                    'position': frame_position,
+                    'prediction': label,
+                    'confidence': confidence
+                }
+                results['frame_results'].append(frame_result)
+                results['frames_analyzed'] += 1
 
-    except Exception as e:
-        logger.error(f"Error during frame extraction: {str(e)}")
-        if 'cap' in locals():
+                self.logger.info(
+                    f"Frame {i+1}/{num_frames} Analysis: "
+                    f"Classification: {label}, Confidence: {confidence:.2%}"
+                )
+
+                # If NSFW content is detected above the threshold, record and optionally stop.
+                if label.lower() == "nsfw" and confidence >= nsfw_threshold:
+                    results['nsfw_detected'] = True
+                    results['first_nsfw_frame'] = frame_result
+                    if stop_on_nsfw:
+                        self.logger.warning(
+                            f"NSFW content detected in frame {i+1} "
+                            f"with {confidence:.2%} confidence. Stopping analysis."
+                        )
+                        break
+
+            return results
+
+        finally:
             cap.release()
-        return False
 
 # Example usage:
 if __name__ == "__main__":
-    # Use Path for better cross-platform compatibility
-    video_file = Path("C:/video_1.mp4")
-    success = extract_frames(
-        video_file,
-        output_folder="extracted_frames",
-        num_frames=6,
-        output_format="jpg",
-        quality=95
-    )
-    
-    if not success:
-        print("Frame extraction failed. Check the logs for details.")
+    try:
+        # Initialize the video content analyzer.
+        analyzer = VideoContentAnalyzer()
+        
+        # Specify the path to your video file.
+        video_file = Path("C:/video_1.mp4")  # Adjust this path as needed.
+        
+        # Analyze the video.
+        results = analyzer.analyze_video(
+            video_path=video_file,
+            num_frames=6,
+            stop_on_nsfw=True,
+            nsfw_threshold=0.5
+        )
+        
+        # Display the overall analysis result.
+        if results['nsfw_detected']:
+            nsfw_frame = results['first_nsfw_frame']
+            print(f"\nNSFW content detected!")
+            print(f"First occurrence: Frame {nsfw_frame['frame_number']}")
+            print(f"Confidence: {nsfw_frame['confidence']:.2%}")
+        else:
+            print(f"\nNo NSFW content detected in {results['frames_analyzed']} analyzed frames")
+            
+        # Print detailed analysis for each frame.
+        print("\nDetailed frame analysis:")
+        for frame in results['frame_results']:
+            print(f"Frame {frame['frame_number']}: "
+                  f"{frame['prediction']} ({frame['confidence']:.2%} confidence)")
+            
+    except Exception as e:
+        logging.error(f"Error during video analysis: {str(e)}")
