@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sayanth T M | Portfolio</title>
+    <style>
+        :root {
+            --primary-color: #FF6700;
+            --bg-color: #101010;
+            --text-color: #F5F5F5;
+            --accent-color: #FF8C32;
+            --secondary-color: #1E1E1E;
+            --border-radius: 12px;
+            --transition: 0.3s ease-in-out;
+            --hero-gradient: linear-gradient(135deg, #FF6700, #FF8C32);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.8;
+        }
+
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: var(--secondary-color);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            padding: 15px 40px;
+            transition: var(--transition);
+        }
+
+        nav ul {
+            display: flex;
+            justify-content: space-around;
+            list-style: none;
+        }
+
+        nav a {
+            text-decoration: none;
+            color: var(--text-color);
+            font-weight: 500;
+            font-size: 1.1rem;
+            transition: var(--transition);
+        }
+
+        nav a:hover {
+            color: var(--accent-color);
+        }
+
+        .hero {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            background: var(--hero-gradient);
+            color: #fff;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .hero p {
+            font-size: 1.4rem;
+            margin-bottom: 25px;
+        }
+
+        .cta-button {
+            background-color: var(--accent-color);
+            color: #fff;
+            padding: 12px 35px;
+            border-radius: var(--border-radius);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: var(--transition);
+        }
+
+        .cta-button:hover {
+            background-color: var(--primary-color);
+            transform: scale(1.05);
+        }
+
+        section {
+            padding: 80px 20px;
+            text-align: center;
+        }
+
+        .section-title {
+            font-size: 2.8rem;
+            margin-bottom: 35px;
+            color: var(--accent-color);
+        }
+
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            padding: 40px;
+        }
+
+        .project-card {
+            background-color: var(--secondary-color);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            transition: var(--transition);
+            overflow: hidden;
+        }
+
+        .project-card:hover {
+            transform: translateY(-8px) scale(1.02);
+        }
+
+        .project-card h3 {
+            font-size: 1.6rem;
+            margin-bottom: 10px;
+        }
+
+        .project-card p {
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        footer {
+            background-color: var(--secondary-color);
+            padding: 25px;
+            text-align: center;
+        }
+
+        footer p {
+            font-size: 1rem;
+        }
+
+        footer a {
+            color: var(--accent-color);
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        footer a:hover {
+            color: var(--primary-color);
+        }
+
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 3rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+
+            .cta-button {
+                padding: 10px 25px;
+                font-size: 0.9rem;
+            }
+
+            .projects-grid {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="#about">About</a></li>
+            <li><a href="#projects">Projects</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <header>
+        <div class="hero">
+            <h1>Sayanth T M</h1>
+            <p>Creative Developer | Tech Enthusiast | Problem Solver</p>
+            <a href="#projects" class="cta-button">Explore My Work</a>
+        </div>
+    </header>
+
+    <section id="about">
+        <h2 class="section-title">About Me</h2>
+        <p>
+            I am a passionate developer specializing in web and mobile app development. With a keen interest in cross-platform applications, 3D modeling, and machine learning, I aim to create impactful digital solutions. Let's innovate together.
+        </p>
+    </section>
+
+    <section id="projects">
+        <h2 class="section-title">My Projects</h2>
+        <div class="projects-grid">
+            <div class="project-card">
+                <h3>Emo</h3>
+                <p>A Flutter-based emotional support app offering comfort and positivity using advanced language models.</p>
+            </div>
+            <div class="project-card">
+                <h3>BMI Calculator App</h3>
+                <p>A Flutter app to calculate BMI scores based on user inputs, featuring an intuitive interface.</p>
+            </div>
+            <div class="project-card">
+                <h3>Medic</h3>
+                <p>A Flutter app that assists users in managing medications using OCR, text-to-speech, and reminders.</p>
+            </div>
+            <div class="project-card">
+                <h3>College Enquiry Chatbot</h3>
+                <p>A chatbot built with NLP and Langchain to answer queries related to college admissions and programs.</p>
+            </div>
+            <div class="project-card">
+                <h3>Crypto Currency Rate App</h3>
+                <p>A Flutter app displaying real-time cryptocurrency rates with a user-friendly interface.</p>
+            </div>
+            <div class="project-card">
+                <h3>Phone Number Details App</h3>
+                <p>An app that provides detailed information about phone numbers, including region and operator data.</p>
+            </div>
+            <div class="project-card">
+                <h3>Pickme</h3>
+                <p>A website offering fun and engaging pickup lines for various occasions, with easy navigation.</p>
+            </div>
+            <div class="project-card">
+                <h3>Pluto</h3>
+                <p>A Flutter app generating flirty pickup lines and jokes, perfect for breaking the ice or sharing a laugh.</p>
+            </div>
+        </div>
+    </section>
+   
+    <footer>
+        &copy; 2024 Sayanth T M. All rights reserved.
+    </footer>
+</body>
+</html>
