@@ -147,7 +147,7 @@ if __name__ == "__main__":
         analyzer = VideoContentAnalyzer()
         
         # Specify the path to your video file.
-        video_file = Path("C:/video_1.mp4")  # Adjust this path as needed.
+        video_file = Path("C:/test1.mp4")  # Adjust this path as needed.
         
         # Analyze the video.
         results = analyzer.analyze_video(
