@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A.R.T.E.M.I.S.S. Monitoring Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Chart.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.1/chart.min.js"></script>
+  <!-- Chart.js Zoom Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <!-- Socket.IO CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.min.js"></script>
+  <!-- html2pdf CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    /* Loader spinner */
+    .loader {
+      border: 4px solid #333;
+      border-top: 4px solid #00aaff; /* Professional blue accent */
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    /* Neon text styling for accents */
+    .neon-text {
+      color: #00aaff;
+      text-shadow: 0 0 5px #00aaff, 0 0 10px #00aaff;
+    }
+  </style>
+</head>
+<body class="bg-black p-4 md:p-8">
+  <div class="max-w-7xl mx-auto px-4 space-y-8">
+    <!-- Loading Spinner -->
+    <div id="loading" class="flex justify-center items-center h-64">
+      <div class="loader" aria-label="Loading"></div>
+      <span class="ml-2 text-white neon-text">Loading data...</span>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div id="dashboardContent" class="hidden space-y-8">
+      <!-- Status Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+        <!-- Total Scanned -->
+        <div class="bg-gradient-to-r from-blue-800 to-blue-600 shadow-lg rounded p-4 text-white" role="region" aria-label="Total Scanned">
+          <div class="flex justify-between items-center pb-2">
+            <span class="text-sm font-medium">Total Scanned</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 neon-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4" />
+            </svg>
+          </div>
+          <div class="text-2xl font-bold" id="total_contents_scanned">0</div>
+          <p class="text-xs">Content items processed</p>
+        </div>
+        <!-- NSFW Detected -->
+        <div class="bg-gradient-to-r from-red-800 to-red-600 shadow-lg rounded p-4 text-white" role="region" aria-label="NSFW Detected">
+          <div class="flex justify-between items-center pb-2">
+            <span class="text-sm font-medium">NSFW Detected</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 neon-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.29 3.86L1.82 18a1.5 1.5 0 001.29 2.24h16.78a1.5 1.5 0 001.29-2.24L13.71 3.86a1.5 1.5 0 00-2.42 0z" />
+            </svg>
+          </div>
+          <div class="text-2xl font-bold" id="total_nsfw_detected">0</div>
+          <p class="text-xs">Flagged content</p>
+        </div>
+        <!-- SFW Detected -->
+        <div class="bg-gradient-to-r from-green-800 to-green-600 shadow-lg rounded p-4 text-white" role="region" aria-label="SFW Detected">
+          <div class="flex justify-between items-center pb-2">
+            <span class="text-sm font-medium">SFW Detected</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 neon-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div class="text-2xl font-bold" id="total_sfw_detected">0</div>
+          <p class="text-xs">Safe content</p>
+        </div>
+        <!-- Users Banned -->
+        <div class="bg-gradient-to-r from-indigo-800 to-indigo-600 shadow-lg rounded p-4 text-white" role="region" aria-label="Users Banned">
+          <div class="flex justify-between items-center pb-2">
+            <span class="text-sm font-medium">Users Banned</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 neon-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 11-12.728 0M12 2v10" />
+            </svg>
+          </div>
+          <div class="text-2xl font-bold" id="total_users_banned">0</div>
+          <p class="text-xs">For violations</p>
+        </div>
+        <!-- Current Violations -->
+        <div class="bg-gradient-to-r from-yellow-800 to-orange-600 shadow-lg rounded p-4 text-white" role="region" aria-label="Current Violations">
+          <div class="flex justify-between items-center pb-2">
+            <span class="text-sm font-medium">Current Violations</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 neon-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <div class="text-2xl font-bold" id="total_violations">0</div>
+          <p class="text-xs">Active cases</p>
+        </div>
+      </div>
+
+      <!-- Charts Section (Graphs) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Action Trend Chart -->
+        <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+          <h2 class="text-lg font-medium">Action Trend</h2>
+          <canvas id="actionTrendChart" class="w-full h-64"></canvas>
+        </div>
+        <!-- Content Type Breakdown Chart -->
+        <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+          <h2 class="text-lg font-medium">Content Type Breakdown</h2>
+          <canvas id="contentTypeChart" class="w-full h-64"></canvas>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Actions Distribution Chart -->
+        <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+          <h2 class="text-lg font-medium">Actions Distribution</h2>
+          <canvas id="actionsDistributionChart" class="w-full h-64"></canvas>
+        </div>
+        <!-- Stats Overview Chart -->
+        <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+          <h2 class="text-lg font-medium">Stats Overview</h2>
+          <canvas id="statsOverviewChart" class="w-full h-64"></canvas>
+        </div>
+      </div>
+      <div class="grid grid-cols-1">
+        <!-- Analytics Comparison Over Time Chart -->
+        <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+          <h2 class="text-lg font-medium">Analytics Comparison Over Time</h2>
+          <canvas id="analyticsComparisonChart" class="w-full h-64"></canvas>
+        </div>
+      </div>
+      
+      <!-- Recent Actions Section -->
+      <div class="bg-white dark:bg-gray-900 shadow-lg rounded p-4">
+        <h2 class="text-lg font-medium">Recent Actions</h2>
+        <div id="recentActions" class="space-y-4" tabindex="0" aria-label="Recent Actions">
+          <!-- Recent actions will be injected here -->
+        </div>
+      </div>
+      
+      <!-- Hidden Plain Text Data (for internal use) -->
+      <div id="pdfContent" class="hidden p-4 text-white">
+        <h1 class="text-xl font-bold mb-4">Dashboard Data Report</h1>
+        <p><strong>Total Scanned:</strong> <span id="pdf_total_contents_scanned"></span></p>
+        <p><strong>NSFW Detected:</strong> <span id="pdf_total_nsfw_detected"></span></p>
+        <p><strong>SFW Detected:</strong> <span id="pdf_total_sfw_detected"></span></p>
+        <p><strong>Users Banned:</strong> <span id="pdf_total_users_banned"></span></p>
+        <p><strong>Current Violations:</strong> <span id="pdf_total_violations"></span></p>
+        <h2 class="mt-4 font-bold">Recent Actions:</h2>
+        <pre id="pdf_recent_actions" class="whitespace-pre-wrap mt-2"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let actionTrendChart, contentTypeChart, actionsDistributionChart, statsOverviewChart, analyticsComparisonChart;
+
+    socket.on('initial_data', (data) => {
+      try {
+        updateDashboard(data);
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('dashboardContent').classList.remove('hidden');
+      } catch (error) {
+        console.error("Error loading data:", error);
+        document.getElementById('loading').innerHTML = '<span class="text-red-500">Error loading data. Please try again later.</span>';
+      }
+    });
+    socket.on('update_data', (data) => {
+      updateDashboard(data);
+    });
+
+    function updateDashboard(data) {
+      // Update status cards
+      document.getElementById('total_contents_scanned').textContent = data.stats.total_contents_scanned;
+      document.getElementById('total_nsfw_detected').textContent = data.stats.total_nsfw_detected;
+      document.getElementById('total_sfw_detected').textContent = data.stats.total_sfw;
+      document.getElementById('total_users_banned').textContent = data.stats.total_users_banned;
+      document.getElementById('total_violations').textContent = data.stats.total_violations;
+
+      // --------------------------
+      // Action Trend Chart (Line Chart)
+      // --------------------------
+      const actionsPerTime = {};
+      data.actions.forEach(action => {
+        const time = action.timestamp;
+        actionsPerTime[time] = (actionsPerTime[time] || 0) + 1;
+      });
+      const actionTrendLabels = Object.keys(actionsPerTime).sort();
+      const actionTrendData = actionTrendLabels.map(time => actionsPerTime[time]);
+      const actionTrendCtx = document.getElementById('actionTrendChart').getContext('2d');
+      if (actionTrendChart) {
+        actionTrendChart.data.labels = actionTrendLabels;
+        actionTrendChart.data.datasets[0].data = actionTrendData;
+        actionTrendChart.update();
+      } else {
+        actionTrendChart = new Chart(actionTrendCtx, {
+          type: 'line',
+          data: {
+            labels: actionTrendLabels,
+            datasets: [{
+              label: 'Actions',
+              data: actionTrendData,
+              borderColor: '#3b82f6',
+              fill: false,
+              tension: 0.1
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true } },
+            plugins: {
+              zoom: {
+                zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                pan: { enabled: true, mode: 'x' }
+              }
+            }
+          }
+        });
+      }
+
+      // --------------------------
+      // Content Type Breakdown Chart (Bar Chart)
+      // --------------------------
+      const contentTypeCtx = document.getElementById('contentTypeChart').getContext('2d');
+      const contentLabels = ['SFW', 'NSFW'];
+      const contentData = [data.stats.total_sfw, data.stats.total_nsfw_detected];
+      if (contentTypeChart) {
+        contentTypeChart.data.labels = contentLabels;
+        contentTypeChart.data.datasets[0].data = contentData;
+        contentTypeChart.update();
+      } else {
+        contentTypeChart = new Chart(contentTypeCtx, {
+          type: 'bar',
+          data: {
+            labels: contentLabels,
+            datasets: [{
+              label: 'Content Type',
+              data: contentData,
+              backgroundColor: ['#10b981', '#ef4444']
+            }]
+          },
+          options: { scales: { y: { beginAtZero: true } } }
+        });
+      }
+
+      // --------------------------
+      // Actions Distribution Chart (Doughnut Chart)
+      // --------------------------
+      const actionsCount = {};
+      data.actions.forEach(action => {
+        actionsCount[action.action] = (actionsCount[action.action] || 0) + 1;
+      });
+      const actionsLabels = Object.keys(actionsCount);
+      const actionsValues = Object.values(actionsCount);
+      const actionsDistCtx = document.getElementById('actionsDistributionChart').getContext('2d');
+      if (actionsDistributionChart) {
+        actionsDistributionChart.data.labels = actionsLabels;
+        actionsDistributionChart.data.datasets[0].data = actionsValues;
+        actionsDistributionChart.update();
+      } else {
+        actionsDistributionChart = new Chart(actionsDistCtx, {
+          type: 'doughnut',
+          data: {
+            labels: actionsLabels,
+            datasets: [{
+              data: actionsValues,
+              backgroundColor: ['#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#f97316']
+            }]
+          },
+          options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+        });
+      }
+
+      // --------------------------
+      // Stats Overview Chart (Horizontal Bar Chart)
+      // --------------------------
+      const statsCtx = document.getElementById('statsOverviewChart').getContext('2d');
+      const statsLabels = ["Total Scanned", "NSFW Detected", "SFW Detected", "Users Banned", "Current Violations"];
+      const statsValues = [
+        data.stats.total_contents_scanned,
+        data.stats.total_nsfw_detected,
+        data.stats.total_sfw,
+        data.stats.total_users_banned,
+        data.stats.total_violations
+      ];
+      if (statsOverviewChart) {
+        statsOverviewChart.data.labels = statsLabels;
+        statsOverviewChart.data.datasets[0].data = statsValues;
+        statsOverviewChart.update();
+      } else {
+        statsOverviewChart = new Chart(statsCtx, {
+          type: 'bar',
+          data: {
+            labels: statsLabels,
+            datasets: [{
+              label: 'Stats Overview',
+              data: statsValues,
+              backgroundColor: ['#3b82f6', '#ef4444', '#10b981', '#8b5cf6', '#f59e0b']
+            }]
+          },
+          options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } }
+        });
+      }
+
+      // --------------------------
+      // Analytics Comparison Over Time (Multi-line Chart)
+      // --------------------------
+      const analyticsData = (data.analytics && data.analytics.length) ? data.analytics : [
+        { timestamp: "2025-02-14 09:00", nsfw: 10, sfw: 90, banned: 1 },
+        { timestamp: "2025-02-14 09:30", nsfw: 15, sfw: 85, banned: 2 },
+        { timestamp: "2025-02-14 10:00", nsfw: 20, sfw: 80, banned: 3 }
+      ];
+      const analyticsLabels = analyticsData.map(item => item.timestamp);
+      const nsfwData = analyticsData.map(item => item.nsfw);
+      const sfwData = analyticsData.map(item => item.sfw);
+      const bannedData = analyticsData.map(item => item.banned);
+      const analyticsCtx = document.getElementById('analyticsComparisonChart').getContext('2d');
+      if (analyticsComparisonChart) {
+        analyticsComparisonChart.data.labels = analyticsLabels;
+        analyticsComparisonChart.data.datasets[0].data = nsfwData;
+        analyticsComparisonChart.data.datasets[1].data = sfwData;
+        analyticsComparisonChart.data.datasets[2].data = bannedData;
+        analyticsComparisonChart.update();
+      } else {
+        analyticsComparisonChart = new Chart(analyticsCtx, {
+          type: 'line',
+          data: {
+            labels: analyticsLabels,
+            datasets: [
+              {
+                label: 'NSFW',
+                data: nsfwData,
+                borderColor: '#ef4444',
+                fill: false,
+                tension: 0.1
+              },
+              {
+                label: 'SFW',
+                data: sfwData,
+                borderColor: '#10b981',
+                fill: false,
+                tension: 0.1
+              },
+              {
+                label: 'Users Banned',
+                data: bannedData,
+                borderColor: '#8b5cf6',
+                fill: false,
+                tension: 0.1
+              }
+            ]
+          },
+          options: { scales: { y: { beginAtZero: true } } }
+        });
+      }
+
+      // --------------------------
+      // Populate Recent Actions
+      // --------------------------
+      const recentActionsContainer = document.getElementById('recentActions');
+      recentActionsContainer.innerHTML = '';
+      data.actions.forEach(action => {
+        const actionDiv = document.createElement('div');
+        actionDiv.className = "flex items-center space-x-4 p-2 bg-gray-50 dark:bg-gray-700 rounded-lg";
+        let circleColor = 'bg-blue-500';
+        if (action.action === 'content_removed') { circleColor = 'bg-yellow-500'; }
+        else if (action.action === 'user_banned') { circleColor = 'bg-red-500'; }
+        actionDiv.innerHTML = `
+          <div class="w-2 h-2 rounded-full ${circleColor}"></div>
+          <div class="flex-1">
+            <div class="font-medium text-gray-800 dark:text-gray-100">User ID: ${action.user_id}</div>
+            <div class="text-sm text-gray-500 dark:text-gray-300">${action.timestamp}</div>
+          </div>
+          <div class="text-sm font-medium text-gray-800 dark:text-gray-100">${action.action}</div>
+        `;
+        recentActionsContainer.appendChild(actionDiv);
+      });
+    }
+  </script>
+</body>
+</html>

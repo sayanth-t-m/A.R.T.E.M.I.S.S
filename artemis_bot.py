@@ -19,6 +19,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from transformers import pipeline, AutoModelForImageClassification, ViTImageProcessor
+import telegram.error  # Add this import
 
 # -------------------------------
 # Configuration and Initialization
@@ -152,7 +153,7 @@ class VideoContentAnalyzer:
 # -------------------------------
 
 def init_db():
-    """Initializes the SQLite database and creates the violations table if it doesn't exist."""
+    """Initializes the SQLite database and creates the necessary tables if they don't exist."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
@@ -161,6 +162,29 @@ def init_db():
             count INTEGER
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            timestamp TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def log_action(user_id: int, action: str):
+    """Logs an action with a timestamp in the database."""
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO actions (user_id, action, timestamp) VALUES (?, ?, ?)", (user_id, action, timestamp))
     conn.commit()
     conn.close()
 
@@ -182,6 +206,7 @@ def add_violation(user_id: int) -> int:
     c.execute("INSERT OR REPLACE INTO violations (user_id, count) VALUES (?, ?)", (user_id, count))
     conn.commit()
     conn.close()
+    increment_stat("total_violations")
     return count
 
 def reset_violation(user_id: int):
@@ -201,6 +226,38 @@ def get_all_violations():
     conn.close()
     return rows
 
+def update_dashboard(user_id: int, violation_count: int, media_type: str):
+    """Updates the dashboard with the latest violation information."""
+    # Placeholder for dashboard update logic
+    logger.info(f"Dashboard updated: User ID {user_id}, Violations {violation_count}, Media Type {media_type}")
+
+def increment_stat(key: str):
+    """Increments a statistic in the database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO stats (key, value) VALUES (?, 0)", (key,))
+    c.execute("UPDATE stats SET value = value + 1 WHERE key = ?", (key,))
+    conn.commit()
+    conn.close()
+
+def get_stat(key: str) -> int:
+    """Retrieves a statistic from the database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT value FROM stats WHERE key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+def get_all_stats() -> dict:
+    """Retrieves all statistics from the database."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT key, value FROM stats")
+    rows = c.fetchall()
+    conn.close()
+    return {row[0]: row[1] for row in rows}
+
 # -------------------------------
 # Bot Command Handlers
 # -------------------------------
@@ -208,7 +265,13 @@ def get_all_violations():
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Exception while handling an update: {context.error}")
     if update and update.message:
-        await update.message.reply_text("An error occurred while processing your request. Please try again later.")
+        try:
+            await update.message.reply_text("An error occurred while processing your request. Please try again later.")
+        except telegram.error.BadRequest as e:
+            if "Message to be replied not found" in str(e):
+                logger.error("Failed to send error message: Message to be replied not found.")
+            else:
+                raise e
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
@@ -297,6 +360,19 @@ async def admin_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error banning user ID {target_user_id}: {str(e)}")
         await update.message.reply_text(f"⚠️ Error banning user ID {target_user_id}. Please try again.")
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends the bot statistics to the user."""
+    stats = get_all_stats()
+    stats_message = (
+        f"📊 <b>Bot Statistics</b>\n\n"
+        f"Total Contents Scanned: {stats.get('total_contents_scanned', 0)}\n"
+        f"Total NSFW Detected: {stats.get('total_nsfw_detected', 0)}\n"
+        f"Total SFW: {stats.get('total_sfw', 0)}\n"
+        f"Total Users Banned: {stats.get('total_users_banned', 0)}\n"
+        f"Total Violations: {stats.get('total_violations', 0)}\n"
+    )
+    await update.message.reply_text(stats_message, parse_mode="HTML")
+
 # -------------------------------
 # Message Handlers
 # -------------------------------
@@ -306,15 +382,22 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = user.id
     chat_id = update.message.chat_id
 
-    logger.info(f"Received video from {user.first_name} (ID: {user_id})")
+    logger.info(f"Received video or GIF from {user.first_name} (ID: {user_id})")
     
     try:
         await context.bot.send_chat_action(chat_id, action=ChatAction.UPLOAD_VIDEO)
-        video = update.message.video
-        file = await video.get_file()
-        temp_path = f"temp_{user_id}.mp4"
+        if update.message.video:
+            file = await update.message.video.get_file()
+            temp_path = f"temp_{user_id}.mp4"
+        elif update.message.animation:  # GIFs are sent as animations
+            file = await update.message.animation.get_file()
+            temp_path = f"temp_{user_id}.gif"
+        else:
+            await update.message.reply_text("⚠️ Unsupported media type.")
+            return
+
         await file.download_to_drive(custom_path=temp_path)
-        logger.info(f"Video downloaded to {temp_path}")
+        logger.info(f"Media downloaded to {temp_path}")
 
         analyzer = VideoContentAnalyzer()
         results = analyzer.analyze_video(
@@ -324,35 +407,55 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             nsfw_threshold=0.5
         )
 
+        increment_stat("total_contents_scanned")
+
         if results.get("nsfw_detected", False):
+            increment_stat("total_nsfw_detected")
             violation_count = add_violation(user_id)
+            update_dashboard(user_id, violation_count, "video")  # Update the dashboard
             await update.message.delete()
-            logger.warning(f"🚨 NSFW detected in video from {user.first_name}, Violation: {violation_count}")
+            log_action(user_id, "content_removed")
+            logger.warning(f"🚨 NSFW detected in media from {user.first_name}, Violation: {violation_count}")
             await context.bot.send_message(
                 chat_id,
-                f"⚠️ NSFW content detected in your video! Violation {violation_count}/{FLAG_THRESHOLD}."
+                f"⚠️ NSFW content detected in your media! Violation {violation_count}/{FLAG_THRESHOLD}."
             )
             timestamp = int(time.time())
-            cached_filename = os.path.join(FLAGGED_VIDEOS_DIR, f"user_{user_id}_{timestamp}.mp4")
+            cached_filename = os.path.join(FLAGGED_VIDEOS_DIR, f"user_{user_id}_{timestamp}.mp4" if update.message.video else f"user_{user_id}_{timestamp}.gif")
             os.rename(temp_path, cached_filename)
-            logger.info(f"Flagged video saved as {cached_filename}")
+            logger.info(f"Flagged media saved as {cached_filename}")
 
             for admin_id in ADMIN_IDS:
                 await context.bot.send_message(
                     admin_id,
                     f"🚨 NSFW content detected from user {user.first_name} (ID: {user_id}). Violation {violation_count}/{FLAG_THRESHOLD}."
                 )
-                await context.bot.send_video(admin_id, video=open(cached_filename, 'rb'))
+                if update.message.video:
+                    await context.bot.send_video(admin_id, video=open(cached_filename, 'rb'))
+                else:
+                    await context.bot.send_animation(admin_id, animation=open(cached_filename, 'rb'))
 
             if violation_count >= FLAG_THRESHOLD:
+                increment_stat("total_users_banned")
                 if update.message.chat.type in ["group", "supergroup"]:
-                    await context.bot.ban_chat_member(chat_id, user_id)
-                    logger.warning(f"🚫 Banned {user.first_name} for repeated NSFW violations.")
-                    await context.bot.send_message(
-                        chat_id,
-                        f"🚫 {user.first_name} has been banned for multiple NSFW violations."
-                    )
-                    reset_violation(user_id)
+                    try:
+                        await context.bot.ban_chat_member(chat_id, user_id)
+                        log_action(user_id, "user_banned")
+                        logger.warning(f"🚫 Banned {user.first_name} for repeated NSFW violations.")
+                        await context.bot.send_message(
+                            chat_id,
+                            f"🚫 {user.first_name} has been banned for multiple NSFW violations."
+                        )
+                        reset_violation(user_id)
+                    except telegram.error.BadRequest as e:
+                        if "Can't remove chat owner" in str(e):
+                            logger.warning(f"🚫 Cannot ban chat owner {user.first_name}.")
+                            await context.bot.send_message(
+                                chat_id,
+                                "🚫 You have exceeded the NSFW violation threshold, but banning the chat owner is not allowed."
+                            )
+                        else:
+                            raise e
                 else:
                     logger.warning("🚫 Violation threshold exceeded but cannot ban in private chats.")
                     await context.bot.send_message(
@@ -360,12 +463,19 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                         "🚫 You have exceeded the NSFW violation threshold, but banning is not supported in private chats."
                     )
         else:
+            increment_stat("total_sfw")
             os.remove(temp_path)
-            logger.info("Video passed NSFW checks; temporary file removed.")
+            logger.info("Media passed NSFW checks; temporary file removed.")
 
     except Exception as e:
-        logger.error(f"Error processing video: {str(e)}")
-        await update.message.reply_text("⚠️ Error processing your video. Please try again.")
+        logger.error(f"Error processing media: {str(e)}")
+        try:
+            await update.message.reply_text("⚠️ Error processing your media. Please try again.")
+        except telegram.error.BadRequest as e:
+            if "Message to be replied not found" in str(e):
+                logger.error("Failed to send error message: Message to be replied not found.")
+            else:
+                raise e
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
@@ -387,9 +497,14 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         logger.info(f"Image analysis - User: {user.first_name}, Label: {label}, Confidence: {score:.2f}")
 
+        increment_stat("total_contents_scanned")
+
         if label.lower() == "nsfw":
+            increment_stat("total_nsfw_detected")
             violation_count = add_violation(user_id)
+            update_dashboard(user_id, violation_count, "image")  # Update the dashboard
             await update.message.delete()
+            log_action(user_id, "content_removed")
             logger.warning(f"🚨 NSFW detected in image from {user.first_name}, Violation: {violation_count}")
             await context.bot.send_message(
                 chat_id,
@@ -407,14 +522,26 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await context.bot.send_photo(admin_id, photo=open(cached_filename, 'rb'))
 
             if violation_count >= FLAG_THRESHOLD:
+                increment_stat("total_users_banned")
                 if update.message.chat.type in ["group", "supergroup"]:
-                    await context.bot.ban_chat_member(chat_id, user_id)
-                    logger.warning(f"🚫 Banned {user.first_name} for repeated NSFW violations.")
-                    await context.bot.send_message(
-                        chat_id,
-                        f"🚫 {user.first_name} has been banned for multiple NSFW violations."
-                    )
-                    reset_violation(user_id)
+                    try:
+                        await context.bot.ban_chat_member(chat_id, user_id)
+                        log_action(user_id, "user_banned")
+                        logger.warning(f"🚫 Banned {user.first_name} for repeated NSFW violations.")
+                        await context.bot.send_message(
+                            chat_id,
+                            f"🚫 {user.first_name} has been banned for multiple NSFW violations."
+                        )
+                        reset_violation(user_id)
+                    except telegram.error.BadRequest as e:
+                        if "Can't remove chat owner" in str(e):
+                            logger.warning(f"🚫 Cannot ban chat owner {user.first_name}.")
+                            await context.bot.send_message(
+                                chat_id,
+                                "🚫 You have exceeded the NSFW violation threshold, but banning the chat owner is not allowed."
+                            )
+                        else:
+                            raise e
                 else:
                     logger.warning("🚫 Violation threshold exceeded but cannot ban in private chats.")
                     await context.bot.send_message(
@@ -422,6 +549,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                         "🚫 You have exceeded the NSFW violation threshold, but banning is not supported in private chats."
                     )
         else:
+            increment_stat("total_sfw")
             os.remove(temp_path)
 
     except Exception as e:
@@ -444,6 +572,7 @@ def main() -> None:
     application.add_handler(CommandHandler("admin_flagged", admin_flagged))
     application.add_handler(CommandHandler("admin_reset", admin_reset))
     application.add_handler(CommandHandler("admin_ban", admin_ban))
+    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
     application.add_handler(MessageHandler(filters.PHOTO, handle_image))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
